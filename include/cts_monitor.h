@@ -12,6 +12,18 @@
 
 #include <time.h>
 
+#ifdef HAVE_LIBFTDI1
+#include <ftdi.h>
+#endif
+
+/**
+ * @brief Device type enumeration
+ */
+typedef enum {
+    DEVICE_TYPE_STANDARD,   /**< Standard serial device */
+    DEVICE_TYPE_FTDI        /**< FTDI USB-to-serial device */
+} device_type_t;
+
 /**
  * @brief Time format options
  */
@@ -48,6 +60,7 @@ typedef struct {
     const char *output_file;       /**< Output file path (NULL for stdout) */
     int verbose;                   /**< Verbose mode flag */
     monitor_mode_t mode;           /**< Monitoring mode: polling or IRQ-driven */
+    device_type_t device_type;     /**< Device type: standard or FTDI */
 } monitor_config_t;
 
 /**
@@ -92,5 +105,31 @@ void cts_monitor_cleanup(void);
  * @return 0 on success, -1 on failure
  */
 int cts_monitor_get_state(signal_state_t *state);
+
+#ifdef HAVE_LIBFTDI1
+/**
+ * @brief Detect if device is an FTDI device
+ * @param device_path Path to the serial device
+ * @return 1 if FTDI device, 0 if not, -1 on error
+ */
+int cts_monitor_is_ftdi_device(const char *device_path);
+
+/**
+ * @brief Initialize FTDI-specific monitoring
+ * @return 0 on success, -1 on failure
+ */
+int cts_monitor_init_ftdi(void);
+
+/**
+ * @brief Update FTDI device monitoring
+ * @return 0 on success, -1 on failure
+ */
+int cts_monitor_update_ftdi(void);
+
+/**
+ * @brief Cleanup FTDI resources
+ */
+void cts_monitor_cleanup_ftdi(void);
+#endif
 
 #endif /* CTS_MONITOR_H */

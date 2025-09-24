@@ -31,11 +31,17 @@ void print_usage(const char* program_name) {
     printf("  irq            High-frequency polling mode (10μs, ultra-low latency)\n");
     printf("\n");
     printf("Serial Device Examples:\n");
-    printf("  /dev/ttyUSB0   USB serial adapter\n");
+    printf("  /dev/ttyUSB0   USB serial adapter (FTDI auto-detected)\n");
     printf("  /dev/ttyS0     Built-in serial port\n");
     printf("  /dev/ttyACM0   USB CDC device\n");
     printf("\n");
-    printf("CTS Monitor v1.1.0 - Monitor CTS/RTS signals on serial lines\n");
+#ifdef HAVE_LIBFTDI1
+    printf("CTS Monitor v1.2.0 - Monitor CTS/RTS signals on serial lines\n");
+    printf("Built with libftdi1 support for enhanced FTDI device monitoring.\n");
+#else
+    printf("CTS Monitor v1.2.0 - Monitor CTS/RTS signals on serial lines\n");
+    printf("Build with libftdi1-dev for enhanced FTDI device support.\n");
+#endif
     printf("Outputs timestamped changes in CTS and RTS signal states.\n");
 }
 
@@ -142,7 +148,8 @@ int main(int argc, char *argv[]) {
         .time_format = time_format,
         .output_file = output_file,
         .verbose = verbose,
-        .mode = monitor_mode
+        .mode = monitor_mode,
+        .device_type = DEVICE_TYPE_STANDARD  // Auto-detected during init
     };
     
     if (cts_monitor_init(&config) != 0) {
@@ -151,7 +158,7 @@ int main(int argc, char *argv[]) {
     }
     
     if (verbose) {
-        printf("CTS Monitor v1.1.0 starting...\n");
+        printf("CTS Monitor v1.2.0 starting...\n");
         printf("Serial device: %s\n", serial_device);
         printf("Monitor mode: %s\n", monitor_mode == MONITOR_MODE_IRQ ? "High-frequency polling (10μs)" : "Standard polling");
         if (monitor_mode == MONITOR_MODE_POLLING) {
@@ -159,6 +166,9 @@ int main(int argc, char *argv[]) {
         }
         printf("Time format: %s\n", time_format == TIME_FORMAT_ABSOLUTE ? "absolute" : "relative");
         printf("Output: %s\n", output_file ? output_file : "stdout");
+#ifdef HAVE_LIBFTDI1
+        printf("FTDI support: Available\n");
+#endif
         printf("\nMonitoring CTS/RTS signals (Ctrl+C to stop)...\n");
         printf("Format: [timestamp] SIGNAL: state\n\n");
     }

@@ -29,6 +29,16 @@ INCLUDES = -I$(INCDIR)
 # Libraries
 LIBS = 
 
+# Check for libftdi1 support
+HAS_LIBFTDI1 := $(shell pkg-config --exists libftdi1 && echo 1)
+ifeq ($(HAS_LIBFTDI1),1)
+    CFLAGS += -DHAVE_LIBFTDI1 $(shell pkg-config --cflags libftdi1)
+    LIBS += $(shell pkg-config --libs libftdi1)
+    $(info Building with libftdi1 support)
+else
+    $(info Building without libftdi1 support - install libftdi1-dev for FTDI device enhancement)
+endif
+
 # Default build type
 BUILD_TYPE ?= debug
 
