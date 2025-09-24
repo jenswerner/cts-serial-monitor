@@ -34,8 +34,8 @@ typedef struct {
  * @brief Monitor mode options
  */
 typedef enum {
-    MONITOR_MODE_POLLING,   /**< Polling-based monitoring */
-    MONITOR_MODE_IRQ        /**< Interrupt-driven monitoring using signals */
+    MONITOR_MODE_POLLING,   /**< Polling-based monitoring (configurable interval) */
+    MONITOR_MODE_IRQ        /**< High-frequency polling mode (10μs intervals for ultra-low latency) */
 } monitor_mode_t;
 
 /**
