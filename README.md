@@ -1,4 +1,4 @@
-# CTS Monitor v1.2.0
+# CTS Monitor v1.2.2
 
 A high-precision serial signal monitoring application for Linux that tracks CTS (Clear To Send) and RTS (Request To Send) control signals on serial ports with microseco### Performance Comparison
 
@@ -6,7 +6,13 @@ A high-precision serial signal monitoring application for Linux that tracks CTS 
 |------|----------------|-----------|---------------|
 | **Polling (1ms)** | ~500μs | ### Version History
 
-### Version 1.2.0 (Current)
+### Version 1.2.2 (Current)
+- **FIXED**: Critical segmentation fault in FTDI+IRQ mode combination
+- **FIXED**: Bad file descriptor errors when using FTDI devices in IRQ mode
+- **IMPROVED**: Enhanced error handling for FTDI device initialization
+- **IMPROVED**: Graceful cleanup and fallback behavior for all device types
+
+### Version 1.2.0
 - **NEW**: libftdi1 integration for direct FTDI chip control
 - **NEW**: Automatic FTDI device detection and GPIO monitoring
 - **NEW**: Sub-microsecond latency potential for FTDI devices  
