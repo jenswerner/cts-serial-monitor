@@ -21,16 +21,21 @@ void print_usage(const char* program_name) {
     printf("Options:\n");
     printf("  -h, --help     Show this help message\n");
     printf("  -v, --verbose  Enable verbose output\n");
-    printf("  -i INTERVAL    Polling interval in microseconds (default: 1000)\n");
+    printf("  -m MODE        Monitoring mode: poll|irq (default: poll)\n");
+    printf("  -i INTERVAL    Polling interval in microseconds (default: 1000, poll mode only)\n");
     printf("  -f FORMAT      Time format: abs|rel (default: abs)\n");
     printf("  -o FILE        Output file (default: stdout)\n");
+    printf("\n");
+    printf("Monitoring Modes:\n");
+    printf("  poll           Polling-based monitoring (lower CPU when idle)\n");
+    printf("  irq            Interrupt-driven monitoring (ultra-low latency)\n");
     printf("\n");
     printf("Serial Device Examples:\n");
     printf("  /dev/ttyUSB0   USB serial adapter\n");
     printf("  /dev/ttyS0     Built-in serial port\n");
     printf("  /dev/ttyACM0   USB CDC device\n");
     printf("\n");
-    printf("CTS Monitor - Monitor CTS/RTS signals on serial lines\n");
+    printf("CTS Monitor v1.1.0 - Monitor CTS/RTS signals on serial lines\n");
     printf("Outputs timestamped changes in CTS and RTS signal states.\n");
 }
 
@@ -40,6 +45,7 @@ int main(int argc, char *argv[]) {
     char *serial_device = NULL;
     char *output_file = NULL;
     time_format_t time_format = TIME_FORMAT_ABSOLUTE;
+    monitor_mode_t monitor_mode = MONITOR_MODE_POLLING;
     
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
@@ -49,6 +55,22 @@ int main(int argc, char *argv[]) {
         }
         else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
             verbose = 1;
+        }
+        else if (strcmp(argv[i], "-m") == 0) {
+            if (i + 1 < argc) {
+                char *mode = argv[++i];
+                if (strcmp(mode, "poll") == 0) {
+                    monitor_mode = MONITOR_MODE_POLLING;
+                } else if (strcmp(mode, "irq") == 0) {
+                    monitor_mode = MONITOR_MODE_IRQ;
+                } else {
+                    fprintf(stderr, "Error: Invalid monitor mode %s (use 'poll' or 'irq')\n", mode);
+                    return EXIT_FAILURE;
+                }
+            } else {
+                fprintf(stderr, "Error: -m option requires a mode (poll|irq)\n");
+                return EXIT_FAILURE;
+            }
         }
         else if (strcmp(argv[i], "-i") == 0) {
             if (i + 1 < argc) {
@@ -119,7 +141,8 @@ int main(int argc, char *argv[]) {
         .poll_interval_us = poll_interval_us,
         .time_format = time_format,
         .output_file = output_file,
-        .verbose = verbose
+        .verbose = verbose,
+        .mode = monitor_mode
     };
     
     if (cts_monitor_init(&config) != 0) {
@@ -128,24 +151,47 @@ int main(int argc, char *argv[]) {
     }
     
     if (verbose) {
-        printf("CTS Monitor starting...\n");
+        printf("CTS Monitor v1.1.0 starting...\n");
         printf("Serial device: %s\n", serial_device);
-        printf("Poll interval: %d microseconds\n", poll_interval_us);
+        printf("Monitor mode: %s\n", monitor_mode == MONITOR_MODE_IRQ ? "IRQ-driven" : "Polling");
+        if (monitor_mode == MONITOR_MODE_POLLING) {
+            printf("Poll interval: %d microseconds\n", poll_interval_us);
+        }
         printf("Time format: %s\n", time_format == TIME_FORMAT_ABSOLUTE ? "absolute" : "relative");
         printf("Output: %s\n", output_file ? output_file : "stdout");
         printf("\nMonitoring CTS/RTS signals (Ctrl+C to stop)...\n");
         printf("Format: [timestamp] SIGNAL: state\n\n");
     }
     
+    // Start IRQ mode if configured
+    if (monitor_mode == MONITOR_MODE_IRQ) {
+        if (cts_monitor_start_irq() != 0) {
+            fprintf(stderr, "Failed to start IRQ-driven monitoring\n");
+            cts_monitor_cleanup();
+            return EXIT_FAILURE;
+        }
+    }
+    
     // Main monitoring loop
     while (running) {
-        if (cts_monitor_update() != 0) {
-            fprintf(stderr, "Monitor update failed\n");
-            break;
+        if (monitor_mode == MONITOR_MODE_POLLING) {
+            // Polling mode: regular updates
+            if (cts_monitor_update() != 0) {
+                fprintf(stderr, "Monitor update failed\n");
+                break;
+            }
+            // Sleep for specified interval
+            usleep(poll_interval_us);
+        } else {
+            // IRQ mode: process events when signaled
+            int events = cts_monitor_process_irq_events();
+            if (events < 0) {
+                fprintf(stderr, "IRQ event processing failed\n");
+                break;
+            }
+            // Short sleep to prevent busy-waiting
+            usleep(1000);  // 1ms
         }
-        
-        // Sleep for specified interval
-        usleep(poll_interval_us);
     }
     
     // Cleanup

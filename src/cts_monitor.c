@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include <errno.h>
+#include <signal.h>
 #include "cts_monitor.h"
 
 static int initialized = 0;
@@ -16,6 +17,8 @@ static FILE *output_fp = NULL;
 static monitor_config_t current_config;
 static signal_state_t last_state;
 static struct timespec start_time;
+static volatile int irq_events_pending = 0;
+static int irq_mode_active = 0;
 
 // Get high-precision timestamp
 static void get_timestamp(char *buffer, size_t size) {
@@ -75,6 +78,70 @@ static void log_signal_change(const char *signal_name, int old_state, int new_st
     
     if (current_config.verbose && output_fp != stdout) {
         printf("[%s] %s: %s %s\n", timestamp, signal_name, state_str, transition);
+    }
+}
+
+// SIGIO signal handler for IRQ-driven mode
+static void sigio_handler(int sig) {
+    (void)sig;  // Unused parameter
+    irq_events_pending = 1;
+}
+
+// Setup signal-driven I/O for IRQ mode
+static int setup_signal_io(void) {
+    struct sigaction sa;
+    int flags;
+    
+    // Install SIGIO signal handler
+    sa.sa_handler = sigio_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;  // Restart interrupted system calls
+    
+    if (sigaction(SIGIO, &sa, NULL) < 0) {
+        fprintf(stderr, "Error installing SIGIO handler: %s\n", strerror(errno));
+        return -1;
+    }
+    
+    // Set process to receive SIGIO signals from serial port
+    if (fcntl(serial_fd, F_SETOWN, getpid()) < 0) {
+        fprintf(stderr, "Error setting process ownership: %s\n", strerror(errno));
+        return -1;
+    }
+    
+    // Enable asynchronous I/O notification
+    flags = fcntl(serial_fd, F_GETFL);
+    if (flags < 0) {
+        fprintf(stderr, "Error getting file flags: %s\n", strerror(errno));
+        return -1;
+    }
+    
+    if (fcntl(serial_fd, F_SETFL, flags | O_ASYNC) < 0) {
+        fprintf(stderr, "Error enabling async I/O: %s\n", strerror(errno));
+        return -1;
+    }
+    
+    if (current_config.verbose) {
+        printf("Signal-driven I/O enabled for IRQ mode\n");
+    }
+    
+    return 0;
+}
+
+// Cleanup signal-driven I/O
+static void cleanup_signal_io(void) {
+    int flags;
+    
+    // Disable asynchronous I/O notification
+    flags = fcntl(serial_fd, F_GETFL);
+    if (flags >= 0) {
+        fcntl(serial_fd, F_SETFL, flags & ~O_ASYNC);
+    }
+    
+    // Restore default SIGIO handler
+    signal(SIGIO, SIG_DFL);
+    
+    if (current_config.verbose) {
+        printf("Signal-driven I/O disabled\n");
     }
 }
 
@@ -211,6 +278,11 @@ void cts_monitor_cleanup() {
         return;
     }
     
+    // Stop IRQ mode if active
+    if (irq_mode_active) {
+        cts_monitor_stop_irq();
+    }
+    
     if (current_config.verbose) {
         char timestamp[64];
         get_timestamp(timestamp, sizeof(timestamp));
@@ -242,4 +314,107 @@ int cts_monitor_get_state(signal_state_t *state) {
     }
     
     return read_signal_state(state);
+}
+
+// Start IRQ-driven monitoring
+int cts_monitor_start_irq(void) {
+    if (!initialized) {
+        fprintf(stderr, "Monitor not initialized\n");
+        return -1;
+    }
+    
+    if (current_config.mode != MONITOR_MODE_IRQ) {
+        if (current_config.verbose) {
+            printf("Not configured for IRQ mode\n");
+        }
+        return -1;
+    }
+    
+    if (irq_mode_active) {
+        if (current_config.verbose) {
+            printf("IRQ mode already active\n");
+        }
+        return 0;
+    }
+    
+    if (setup_signal_io() < 0) {
+        return -1;
+    }
+    
+    irq_mode_active = 1;
+    irq_events_pending = 0;
+    
+    if (current_config.verbose) {
+        printf("IRQ-driven monitoring started\n");
+    }
+    
+    return 0;
+}
+
+// Stop IRQ-driven monitoring
+int cts_monitor_stop_irq(void) {
+    if (!irq_mode_active) {
+        return 0;
+    }
+    
+    cleanup_signal_io();
+    irq_mode_active = 0;
+    irq_events_pending = 0;
+    
+    if (current_config.verbose) {
+        printf("IRQ-driven monitoring stopped\n");
+    }
+    
+    return 0;
+}
+
+// Process pending IRQ events
+int cts_monitor_process_irq_events(void) {
+    if (!initialized || !irq_mode_active) {
+        return -1;
+    }
+    
+    if (!irq_events_pending) {
+        return 0;  // No events pending
+    }
+    
+    // Reset the flag first to avoid race conditions
+    irq_events_pending = 0;
+    
+    // Process the signal state change
+    signal_state_t current_state;
+    if (read_signal_state(&current_state) < 0) {
+        return -1;
+    }
+    
+    int events_processed = 0;
+    
+    // Check for changes and log them
+    if (current_state.cts != last_state.cts) {
+        log_signal_change("CTS", last_state.cts, current_state.cts);
+        events_processed++;
+    }
+    
+    if (current_state.rts != last_state.rts) {
+        log_signal_change("RTS", last_state.rts, current_state.rts);
+        events_processed++;
+    }
+    
+    // Also monitor DSR/DTR if verbose mode (optional)
+    if (current_config.verbose) {
+        if (current_state.dsr != last_state.dsr) {
+            log_signal_change("DSR", last_state.dsr, current_state.dsr);
+            events_processed++;
+        }
+        
+        if (current_state.dtr != last_state.dtr) {
+            log_signal_change("DTR", last_state.dtr, current_state.dtr);
+            events_processed++;
+        }
+    }
+    
+    // Update last known state
+    last_state = current_state;
+    
+    return events_processed;
 }

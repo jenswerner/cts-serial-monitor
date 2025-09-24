@@ -31,14 +31,23 @@ typedef struct {
 } signal_state_t;
 
 /**
+ * @brief Monitor mode options
+ */
+typedef enum {
+    MONITOR_MODE_POLLING,   /**< Polling-based monitoring */
+    MONITOR_MODE_IRQ        /**< Interrupt-driven monitoring using signals */
+} monitor_mode_t;
+
+/**
  * @brief Monitor configuration structure
  */
 typedef struct {
     const char *serial_device;     /**< Serial device path (e.g., /dev/ttyUSB0) */
-    int poll_interval_us;          /**< Polling interval in microseconds */
+    int poll_interval_us;          /**< Polling interval in microseconds (polling mode only) */
     time_format_t time_format;     /**< Timestamp format */
     const char *output_file;       /**< Output file path (NULL for stdout) */
     int verbose;                   /**< Verbose mode flag */
+    monitor_mode_t mode;           /**< Monitoring mode: polling or IRQ-driven */
 } monitor_config_t;
 
 /**
@@ -49,10 +58,28 @@ typedef struct {
 int cts_monitor_init(const monitor_config_t *config);
 
 /**
+ * @brief Start IRQ-driven monitoring (non-blocking)
+ * @return 0 on success, -1 on failure
+ */
+int cts_monitor_start_irq(void);
+
+/**
+ * @brief Stop IRQ-driven monitoring
+ * @return 0 on success, -1 on failure
+ */
+int cts_monitor_stop_irq(void);
+
+/**
  * @brief Update monitor (check for signal changes)
  * @return 0 on success, -1 on failure
  */
 int cts_monitor_update(void);
+
+/**
+ * @brief Process pending IRQ events
+ * @return Number of events processed, -1 on failure
+ */
+int cts_monitor_process_irq_events(void);
 
 /**
  * @brief Clean up and shutdown monitor
