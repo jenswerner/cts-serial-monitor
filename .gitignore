@@ -1,0 +1,76 @@
+# Ignore build artifacts
+build/
+*.o
+*.so
+*.a
+*.out
+cts_monitor
+
+# Ignore backup and temporary files
+*~
+*.bak
+*.tmp
+*.swp
+*.swo
+.*.swp
+.*.swo
+
+# Ignore IDE files
+.vscode/
+.clangd/
+compile_commands.json
+*.code-workspace
+
+# Ignore OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Ignore documentation output
+docs/html/
+docs/latex/
+docs/man/
+docs/xml/
+
+# Ignore test results and coverage
+*.gcov
+*.gcda
+*.gcno
+coverage/
+*.info
+
+# Ignore debugging and profiling files
+gmon.out
+cachegrind.out.*
+callgrind.out.*
+massif.out.*
+helgrind.out.*
+drd.out.*
+
+# Ignore configuration files (keep templates)
+config.txt
+*.conf
+!*.conf.example
+
+# Ignore log files
+*.log
+logs/
+
+# Ignore package files
+*.deb
+*.rpm
+*.tar.gz
+*.zip
+
+# Ignore core dumps
+core
+core.*
+vgcore.*
+
+# Ignore local development files
+local_*
+dev_*
