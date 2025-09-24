@@ -1,4 +1,4 @@
-# CTS Monitor v1.2.3
+# CTS Monitor v1.2.4
 
 A high-precision serial signal monitoring application for Linux that tracks CTS (Clear To Send) and RTS (Request To Send) control signals on serial ports with microseco### Performance Comparison
 
@@ -6,7 +6,15 @@ A high-precision serial signal monitoring application for Linux that tracks CTS 
 |------|----------------|-----------|---------------|
 | **Polling (1ms)** | ~500μs | ### Version History
 
-### Version 1.2.3 (Current)
+### Version 1.2.4 (Current)
+- **FIXED**: Critical infinite signal loop when pressing Ctrl+C multiple times
+- **FIXED**: Program not exiting properly in FTDI IRQ mode with high-frequency polling
+- **FIXED**: Signal handler race conditions causing repeated cleanup execution
+- **IMPROVED**: Robust signal handling using sigaction() instead of signal()
+- **IMPROVED**: Immediate program termination using _exit() to avoid atexit handlers
+- **IMPROVED**: Enhanced protection against signal handler re-entry scenarios
+
+### Version 1.2.3
 - **FIXED**: Critical memory access error (Speicherzugriffsfehler) when pressing Ctrl+C
 - **FIXED**: Race conditions in cleanup routines causing segmentation faults
 - **FIXED**: Double cleanup scenarios that could cause crashes
