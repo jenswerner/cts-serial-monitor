@@ -94,14 +94,22 @@ static void log_signal_change(const char *signal_name, int old_state, int new_st
 
 // Setup high-frequency polling for IRQ mode (more reliable than SIGIO)
 static int setup_signal_io(void) {
-    // Note: True hardware interrupt-driven CTS/RTS detection is not reliably
-    // supported across all Linux serial drivers and hardware combinations.
-    // Instead, we use very high-frequency polling (10μs intervals) to achieve
-    // near-IRQ performance while maintaining hardware compatibility.
+    // Set the serial port to non-blocking mode for select() monitoring
+    int flags = fcntl(serial_fd, F_GETFL);
+    if (flags < 0) {
+        fprintf(stderr, "Error getting serial port flags: %s\n", strerror(errno));
+        return -1;
+    }
+    
+    // Make serial port non-blocking for better select() behavior
+    if (fcntl(serial_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        fprintf(stderr, "Error setting non-blocking mode: %s\n", strerror(errno));
+        return -1;
+    }
     
     if (current_config.verbose) {
-        printf("IRQ-mode: Using high-frequency polling (10μs) for reliable CTS/RTS detection\n");
-        printf("Note: True hardware interrupts for modem signals are not universally supported\n");
+        printf("IRQ-mode: Using select() system call for event-driven monitoring\n");
+        printf("Serial port set to non-blocking mode for interrupt-driven I/O\n");
     }
     
     irq_mode_active = 1;
@@ -110,10 +118,18 @@ static int setup_signal_io(void) {
 
 // Cleanup signal-driven I/O
 static void cleanup_signal_io(void) {
+    if (serial_fd >= 0) {
+        // Restore blocking mode
+        int flags = fcntl(serial_fd, F_GETFL);
+        if (flags >= 0) {
+            fcntl(serial_fd, F_SETFL, flags & ~O_NONBLOCK);
+        }
+    }
+    
     irq_mode_active = 0;
     
     if (current_config.verbose) {
-        printf("High-frequency polling disabled\n");
+        printf("Event-driven monitoring disabled, restored blocking mode\n");
     }
 }
 
@@ -390,7 +406,7 @@ int cts_monitor_stop_irq(void) {
     return 0;
 }
 
-// Process pending IRQ events (now uses continuous high-frequency polling)
+// Process pending IRQ events using select() for true event-driven monitoring
 int cts_monitor_process_irq_events(void) {
     if (!initialized || !irq_mode_active) {
         return -1;
@@ -402,43 +418,116 @@ int cts_monitor_process_irq_events(void) {
     }
 #endif
     
-    // In IRQ mode, we continuously check for changes at high frequency
-    // This provides much better performance than the default polling mode
-    signal_state_t current_state;
-    if (read_signal_state(&current_state) < 0) {
-        return -1;
+    // Use select() to wait for activity on the serial port
+    fd_set readfds, errorfds;
+    struct timeval timeout;
+    
+    FD_ZERO(&readfds);
+    FD_ZERO(&errorfds);
+    FD_SET(serial_fd, &readfds);
+    FD_SET(serial_fd, &errorfds);
+    
+    // Set timeout to 100ms to allow for periodic checking
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 100000;  // 100ms
+    
+    int result = select(serial_fd + 1, &readfds, NULL, &errorfds, &timeout);
+    
+    if (result < 0) {
+        if (errno != EINTR) {  // Ignore interruption by signals
+            fprintf(stderr, "select() failed: %s\n", strerror(errno));
+            return -1;
+        }
+        return 0;  // Interrupted by signal, not an error
     }
     
-    int events_processed = 0;
-    
-    // Check for changes and log them
-    if (current_state.cts != last_state.cts) {
-        log_signal_change("CTS", last_state.cts, current_state.cts);
-        events_processed++;
-    }
-    
-    if (current_state.rts != last_state.rts) {
-        log_signal_change("RTS", last_state.rts, current_state.rts);
-        events_processed++;
-    }
-    
-    // Also monitor DSR/DTR if verbose mode (optional)
-    if (current_config.verbose) {
-        if (current_state.dsr != last_state.dsr) {
-            log_signal_change("DSR", last_state.dsr, current_state.dsr);
+    if (result == 0) {
+        // Timeout occurred - check for signal changes anyway
+        // This ensures we don't miss state changes that don't trigger select()
+        signal_state_t current_state;
+        if (read_signal_state(&current_state) < 0) {
+            return -1;
+        }
+        
+        int events_processed = 0;
+        
+        // Check for changes and log them
+        if (current_state.cts != last_state.cts) {
+            log_signal_change("CTS", last_state.cts, current_state.cts);
             events_processed++;
         }
         
-        if (current_state.dtr != last_state.dtr) {
-            log_signal_change("DTR", last_state.dtr, current_state.dtr);
+        if (current_state.rts != last_state.rts) {
+            log_signal_change("RTS", last_state.rts, current_state.rts);
             events_processed++;
         }
+        
+        // Also monitor DSR/DTR if verbose mode
+        if (current_config.verbose) {
+            if (current_state.dsr != last_state.dsr) {
+                log_signal_change("DSR", last_state.dsr, current_state.dsr);
+                events_processed++;
+            }
+            
+            if (current_state.dtr != last_state.dtr) {
+                log_signal_change("DTR", last_state.dtr, current_state.dtr);
+                events_processed++;
+            }
+        }
+        
+        // Update last known state
+        last_state = current_state;
+        
+        return events_processed;
     }
     
-    // Update last known state
-    last_state = current_state;
+    // Activity detected on serial port file descriptor
+    if (FD_ISSET(serial_fd, &readfds) || FD_ISSET(serial_fd, &errorfds)) {
+        // Read and discard any pending data to clear the file descriptor
+        char buffer[256];
+        while (read(serial_fd, buffer, sizeof(buffer)) > 0) {
+            // Discard data - we only care about control signal changes
+        }
+        
+        // Now check for signal state changes
+        signal_state_t current_state;
+        if (read_signal_state(&current_state) < 0) {
+            return -1;
+        }
+        
+        int events_processed = 0;
+        
+        // Check for changes and log them
+        if (current_state.cts != last_state.cts) {
+            log_signal_change("CTS", last_state.cts, current_state.cts);
+            events_processed++;
+        }
+        
+        if (current_state.rts != last_state.rts) {
+            log_signal_change("RTS", last_state.rts, current_state.rts);
+            events_processed++;
+        }
+        
+        // Also monitor DSR/DTR if verbose mode
+        if (current_config.verbose) {
+            if (current_state.dsr != last_state.dsr) {
+                log_signal_change("DSR", last_state.dsr, current_state.dsr);
+                events_processed++;
+            }
+            
+            if (current_state.dtr != last_state.dtr) {
+                log_signal_change("DTR", last_state.dtr, current_state.dtr);
+                events_processed++;
+            }
+        }
+        
+        // Update last known state
+        last_state = current_state;
+        
+        return events_processed;
+    }
     
-    return events_processed;
+    return 0;  // No events processed
 }
 
 #ifdef HAVE_LIBFTDI1

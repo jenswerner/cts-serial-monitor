@@ -28,7 +28,7 @@ void print_usage(const char* program_name) {
     printf("\n");
     printf("Monitoring Modes:\n");
     printf("  poll           Polling-based monitoring (configurable interval)\n");
-    printf("  irq            High-frequency polling mode (10μs, ultra-low latency)\n");
+    printf("  irq            Event-driven monitoring using select() system call\n");
     printf("\n");
     printf("Serial Device Examples:\n");
     printf("  /dev/ttyUSB0   USB serial adapter (FTDI auto-detected)\n");
@@ -160,7 +160,7 @@ int main(int argc, char *argv[]) {
     if (verbose) {
         printf("CTS Monitor v1.2.0 starting...\n");
         printf("Serial device: %s\n", serial_device);
-        printf("Monitor mode: %s\n", monitor_mode == MONITOR_MODE_IRQ ? "High-frequency polling (10μs)" : "Standard polling");
+        printf("Monitor mode: %s\n", monitor_mode == MONITOR_MODE_IRQ ? "Event-driven (select)" : "Standard polling");
         if (monitor_mode == MONITOR_MODE_POLLING) {
             printf("Poll interval: %d microseconds\n", poll_interval_us);
         }
@@ -193,14 +193,13 @@ int main(int argc, char *argv[]) {
             // Sleep for specified interval
             usleep(poll_interval_us);
         } else {
-            // IRQ mode: high-frequency polling for low latency
+            // IRQ mode: event-driven monitoring with select()
             int events = cts_monitor_process_irq_events();
             if (events < 0) {
                 fprintf(stderr, "IRQ event processing failed\n");
                 break;
             }
-            // Very short sleep for high-frequency monitoring (10μs = 100kHz polling rate)
-            usleep(10);
+            // No sleep needed - select() provides the blocking/timing
         }
     }
     
