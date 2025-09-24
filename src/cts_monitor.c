@@ -94,6 +94,24 @@ static void log_signal_change(const char *signal_name, int old_state, int new_st
 
 // Setup high-frequency polling for IRQ mode (more reliable than SIGIO)
 static int setup_signal_io(void) {
+#ifdef HAVE_LIBFTDI1
+    // If using FTDI, we don't need to configure the serial file descriptor
+    if (using_ftdi) {
+        if (current_config.verbose) {
+            printf("IRQ-mode: Using FTDI direct GPIO monitoring (no select() needed)\n");
+            printf("FTDI device provides direct hardware event detection\n");
+        }
+        irq_mode_active = 1;
+        return 0;
+    }
+#endif
+
+    // For standard serial devices, set up select()-based monitoring
+    if (serial_fd < 0) {
+        fprintf(stderr, "Serial device not properly initialized for IRQ mode\n");
+        return -1;
+    }
+    
     // Set the serial port to non-blocking mode for select() monitoring
     int flags = fcntl(serial_fd, F_GETFL);
     if (flags < 0) {
@@ -118,6 +136,18 @@ static int setup_signal_io(void) {
 
 // Cleanup signal-driven I/O
 static void cleanup_signal_io(void) {
+#ifdef HAVE_LIBFTDI1
+    // If using FTDI, no serial file descriptor cleanup needed
+    if (using_ftdi) {
+        irq_mode_active = 0;
+        if (current_config.verbose) {
+            printf("FTDI IRQ mode disabled\n");
+        }
+        return;
+    }
+#endif
+
+    // For standard serial devices, restore blocking mode
     if (serial_fd >= 0) {
         // Restore blocking mode
         int flags = fcntl(serial_fd, F_GETFL);
