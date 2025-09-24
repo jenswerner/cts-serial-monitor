@@ -8,11 +8,16 @@
 #include "cts_monitor.h"
 
 static volatile int running = 1;
+static volatile int signal_received = 0;
 
 void signal_handler(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         printf("\nReceived signal %d, shutting down gracefully...\n", sig);
+        signal_received = sig;
         running = 0;
+        
+        // Call cleanup directly from signal handler to avoid race conditions
+        cts_monitor_cleanup();
     }
 }
 
@@ -203,8 +208,10 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    // Cleanup
-    cts_monitor_cleanup();
+    // Cleanup - only if not already done in signal handler
+    if (!signal_received) {
+        cts_monitor_cleanup();
+    }
     
     if (verbose) {
         printf("\nCTS Monitor shutdown complete\n");

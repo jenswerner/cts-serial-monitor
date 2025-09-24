@@ -24,6 +24,7 @@ static monitor_config_t current_config;
 static signal_state_t last_state;
 static struct timespec start_time;
 static int irq_mode_active = 0;
+static volatile int cleanup_in_progress = 0;
 
 #ifdef HAVE_LIBFTDI1
 static struct ftdi_context ftdi_ctx;
@@ -340,9 +341,12 @@ int cts_monitor_update() {
 }
 
 void cts_monitor_cleanup() {
-    if (!initialized) {
+    // Prevent double cleanup
+    if (!initialized || cleanup_in_progress) {
         return;
     }
+    
+    cleanup_in_progress = 1;  // Set flag to prevent re-entry
     
     // Stop IRQ mode if active
     if (irq_mode_active) {
@@ -356,10 +360,15 @@ void cts_monitor_cleanup() {
     }
 #endif
     
-    if (current_config.verbose) {
+    // Write final message to output file before closing it
+    if (current_config.verbose && output_fp && (output_fp == stdout || output_fp != NULL)) {
         char timestamp[64];
         get_timestamp(timestamp, sizeof(timestamp));
         fprintf(output_fp, "[%s] === CTS Monitor Stopped ===\n", timestamp);
+        fflush(output_fp);  // Ensure output is written
+    }
+    
+    if (current_config.verbose) {
         printf("Cleaning up CTS Monitor...\n");
     }
     
@@ -368,12 +377,14 @@ void cts_monitor_cleanup() {
         serial_fd = -1;
     }
     
+    // Close output file after writing final message
     if (output_fp && output_fp != stdout) {
         fclose(output_fp);
         output_fp = NULL;
     }
     
     initialized = 0;
+    cleanup_in_progress = 0;  // Reset flag
     
     if (current_config.verbose) {
         printf("CTS Monitor cleanup complete\n");
@@ -723,8 +734,22 @@ void cts_monitor_cleanup_ftdi(void) {
         return;
     }
     
-    ftdi_usb_close(&ftdi_ctx);
+    if (current_config.verbose) {
+        printf("FTDI device cleanup starting...\n");
+    }
+    
+    // Close USB connection safely
+    if (ftdi_initialized) {
+        int ret = ftdi_usb_close(&ftdi_ctx);
+        if (ret < 0 && current_config.verbose) {
+            printf("Warning: FTDI USB close returned error: %s\n", ftdi_get_error_string(&ftdi_ctx));
+        }
+    }
+    
+    // Deinitialize FTDI context
     ftdi_deinit(&ftdi_ctx);
+    
+    // Reset flags
     ftdi_initialized = 0;
     using_ftdi = 0;
     
