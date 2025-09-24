@@ -9,15 +9,26 @@
 
 static volatile int running = 1;
 static volatile int signal_received = 0;
+static volatile int cleanup_done = 0;
 
 void signal_handler(int sig) {
+    // Prevent multiple executions of signal handler
+    if (cleanup_done) {
+        _exit(0);  // Force exit if we're already cleaning up
+    }
+    
     if (sig == SIGINT || sig == SIGTERM) {
         printf("\nReceived signal %d, shutting down gracefully...\n", sig);
         signal_received = sig;
         running = 0;
+        cleanup_done = 1;  // Set flag immediately
         
-        // Call cleanup directly from signal handler to avoid race conditions
+        // Call cleanup directly from signal handler
         cts_monitor_cleanup();
+        
+        // Exit immediately to prevent infinite signal loops
+        printf("CTS Monitor shutdown complete\n");
+        _exit(0);  // Use _exit instead of exit to avoid atexit handlers
     }
 }
 
@@ -142,9 +153,21 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     
-    // Set up signal handlers
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+    // Set up signal handlers with sigaction for more reliable handling
+    struct sigaction sa;
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESETHAND;  // Reset to default after first signal
+    
+    if (sigaction(SIGINT, &sa, NULL) != 0) {
+        perror("sigaction SIGINT");
+        return EXIT_FAILURE;
+    }
+    
+    if (sigaction(SIGTERM, &sa, NULL) != 0) {
+        perror("sigaction SIGTERM");
+        return EXIT_FAILURE;
+    }
     
     // Initialize monitor
     monitor_config_t config = {
